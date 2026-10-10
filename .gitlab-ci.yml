@@ -1,0 +1,28 @@
+# Sprint 06: docs-as-code pipeline (Chinchilla Ch. 6).
+# test  -> unit tests, doctests, AI hallucination test, TODO tracking
+# pages -> Sphinx HTML with -W (zero warnings) published to GitLab Pages
+stages:
+  - test
+  - deploy
+
+default:
+  image: python:3.12
+  before_script:
+    - pip install -r requirements.txt
+
+test:
+  stage: test
+  script:
+    - python -m pytest -v
+    - sphinx-build -W --keep-going -b doctest docs/source build/doctest
+
+pages:
+  stage: deploy
+  script:
+    # -W turns every warning (broken cross-reference, bad docstring) into a failure
+    - sphinx-build -W --keep-going -b html docs/source public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

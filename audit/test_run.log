@@ -1,0 +1,84 @@
+$ sphinx-build -W --keep-going -b doctest docs/source build/doctest
+Doctest summary
+===============
+   66 tests
+    0 failures in tests
+    0 failures in setup code
+    0 failures in cleanup code
+
+$ python -m pytest -v
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.1.1, pluggy-1.6.0 -- python
+rootdir: .
+configfile: pyproject.toml
+testpaths: tests, src
+plugins: anyio-4.13.0
+collecting ... collected 65 items
+
+tests/test_ai_hallucinations.py::test_checker_detects_an_invented_method PASSED [  1%]
+tests/test_ai_hallucinations.py::test_checker_detects_an_invented_keyword_argument PASSED [  3%]
+tests/test_ai_hallucinations.py::test_published_docstrings_reference_only_real_apis[geodesk.terrain] PASSED [  4%]
+tests/test_ai_hallucinations.py::test_published_docstrings_reference_only_real_apis[geodesk.errors] PASSED [  6%]
+tests/test_ai_hallucinations.py::test_ai_outputs_match_use_verify_cite_log[ai_docstring.py] PASSED [  7%]
+tests/test_ai_hallucinations.py::test_ai_outputs_match_use_verify_cite_log[ai_runs/run2_sonnet_quickstart.py] PASSED [  9%]
+tests/test_ai_hallucinations.py::test_ai_outputs_match_use_verify_cite_log[ai_runs/run3_haiku_quickstart.py] PASSED [ 10%]
+tests/test_ai_hallucinations.py::test_checker_reads_indented_google_examples PASSED [ 12%]
+tests/test_ai_hallucinations.py::test_ai_outputs_were_actually_parsed[ai_docstring.py] PASSED [ 13%]
+tests/test_ai_hallucinations.py::test_ai_outputs_were_actually_parsed[ai_runs/run2_sonnet_quickstart.py] PASSED [ 15%]
+tests/test_ai_hallucinations.py::test_ai_outputs_were_actually_parsed[ai_runs/run3_haiku_quickstart.py] PASSED [ 16%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourGenerator] PASSED [ 18%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourGenerator.levels] PASSED [ 20%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourGenerator.generate] PASSED [ 21%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourLayer] PASSED [ 23%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourLayer.elevations] PASSED [ 24%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourLayer.to_geojson] PASSED [ 26%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourLine] PASSED [ 27%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ContourLine.length_m] PASSED [ 29%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid] PASSED [ 30%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid.from_rows] PASSED [ 32%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid.shape] PASSED [ 33%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid.size_mb] PASSED [ 35%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid.nodata_ratio] PASSED [ 36%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[ElevationGrid.valid_range] PASSED [ 38%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[TerrainError] PASSED [ 40%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[InvalidIntervalError] PASSED [ 41%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[DEMTooLargeError] PASSED [ 43%]
+tests/test_docstring_coverage.py::test_public_symbol_is_fully_documented[NoDataCoverageError] PASSED [ 44%]
+tests/test_docstring_coverage.py::test_internal_helpers_explain_their_exclusion PASSED [ 46%]
+tests/test_docstring_coverage.py::test_public_symbol_count PASSED        [ 47%]
+tests/test_geotiff_quickstart.py::test_module_quickstart_runs_and_matches_in_memory_example PASSED [ 49%]
+tests/test_geotiff_quickstart.py::test_ai_corner_origin_shifts_contours_by_half_a_cell PASSED [ 50%]
+tests/test_terrain.py::test_interval_below_fr09_accuracy_is_rejected[0.0] PASSED [ 52%]
+tests/test_terrain.py::test_interval_below_fr09_accuracy_is_rejected[0.49] PASSED [ 53%]
+tests/test_terrain.py::test_interval_below_fr09_accuracy_is_rejected[-1.0] PASSED [ 55%]
+tests/test_terrain.py::test_interval_below_fr09_accuracy_is_rejected[inf] PASSED [ 56%]
+tests/test_terrain.py::test_interval_below_fr09_accuracy_is_rejected[nan] PASSED [ 58%]
+tests/test_terrain.py::test_levels_are_multiples_of_interval_inside_range PASSED [ 60%]
+tests/test_terrain.py::test_flat_terrain_produces_no_contours PASSED     [ 61%]
+tests/test_terrain.py::test_every_vertex_lies_on_its_contour_elevation PASSED [ 63%]
+tests/test_terrain.py::test_saddle_cell_produces_two_segments PASSED     [ 64%]
+tests/test_terrain.py::test_cells_touching_nodata_are_skipped PASSED     [ 66%]
+tests/test_terrain.py::test_oversized_dem_is_rejected_with_api_error_code PASSED [ 67%]
+tests/test_terrain.py::test_all_nodata_dem_reports_invalid_dem PASSED    [ 69%]
+tests/test_terrain.py::test_geojson_export_keeps_elevation_property PASSED [ 70%]
+tests/test_todo_tracking.py::test_no_untracked_todo_comments PASSED      [ 72%]
+src/geodesk/errors.py::geodesk.errors.DEMTooLargeError PASSED            [ 73%]
+src/geodesk/errors.py::geodesk.errors.InvalidIntervalError PASSED        [ 75%]
+src/geodesk/errors.py::geodesk.errors.NoDataCoverageError PASSED         [ 76%]
+src/geodesk/errors.py::geodesk.errors.TerrainError PASSED                [ 78%]
+src/geodesk/terrain.py::geodesk.terrain.ContourGenerator PASSED          [ 80%]
+src/geodesk/terrain.py::geodesk.terrain.ContourGenerator.generate PASSED [ 81%]
+src/geodesk/terrain.py::geodesk.terrain.ContourGenerator.levels PASSED   [ 83%]
+src/geodesk/terrain.py::geodesk.terrain.ContourLayer PASSED              [ 84%]
+src/geodesk/terrain.py::geodesk.terrain.ContourLayer.elevations PASSED   [ 86%]
+src/geodesk/terrain.py::geodesk.terrain.ContourLayer.to_geojson PASSED   [ 87%]
+src/geodesk/terrain.py::geodesk.terrain.ContourLine PASSED               [ 89%]
+src/geodesk/terrain.py::geodesk.terrain.ContourLine.length_m PASSED      [ 90%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid PASSED             [ 92%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid.from_rows PASSED   [ 93%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid.nodata_ratio PASSED [ 95%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid.shape PASSED       [ 96%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid.size_mb PASSED     [ 98%]
+src/geodesk/terrain.py::geodesk.terrain.ElevationGrid.valid_range PASSED [100%]
+
+============================= 65 passed in 0.63s ==============================

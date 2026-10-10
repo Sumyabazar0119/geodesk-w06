@@ -1,0 +1,621 @@
+--- manual/<module>
++++ ai/<module>
+@@ -1,14 +1,26 @@
+-Contour line generation from DEM rasters (arc42 block B5.2, FR-09).
++Contour line generation from digital elevation models (DEMs) for GeoDesk.
+ 
+-This module is the engine behind ``POST /terrain/contours`` in the W05 API.
+-Its public API is :class:`ElevationGrid` (the input DEM),
+-:class:`ContourGenerator` (the algorithm) and :class:`ContourLayer` /
+-:class:`ContourLine` (the result).
++This module provides the building blocks used by GeoDesk's terrain tools to
++turn a raster elevation grid into vector contour lines:
+ 
+-Every example in this module uses the same 3 × 3 sample of the Zaisan hill DEM
+-(layer ``layer_dem_44c1``, 30 m cells, UTM zone 48N) so that results can be
+-compared across classes::
++* :class:`ElevationGrid` - an immutable, validated DEM held in memory.
++* :class:`ContourLine` - a single polyline at one elevation.
++* :class:`ContourLayer` - a collection of contour lines derived from a DEM,
++  exportable as GeoJSON.
++* :class:`ContourGenerator` - traces contours at a regular interval using a
++  marching-squares style approach with linear interpolation along cell edges.
+ 
+-    1350  1351  1352
+-    1351  1352  1353
+-    1352  1353  1354
++Example:
++    >>> from geodesk.terrain import ElevationGrid, ContourGenerator
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01",
++    ...     [[100, 110, 120], [105, 115, 125], [110, 120, 130]],
++    ...     cell_size_m=30.0,
++    ...     origin=(500000.0, 5200000.0),
++    ... )
++    >>> layer = ContourGenerator(interval_m=10.0).generate(grid)
++    >>> layer.elevations()
++    [110.0, 120.0]
++
++See Also:
++    :mod:`geodesk.errors` for the exceptions raised by this module.
+--- manual/ElevationGrid
++++ ai/ElevationGrid
+@@ -1,24 +1,34 @@
+-A DEM raster held in memory as rows of elevations in metres.
++An immutable regular grid of elevation values (a DEM).
+ 
+-Rows run from north to south and columns from west to east, matching the
+-GeoTIFF pixel order produced by B1.2 (raster reader).
++Rows run from north to south and columns from west to east. The
++``origin`` is the north-west corner of the grid in the grid's CRS.
+ 
+-Attributes:
+-    layer_id (str): GeoDesk layer ID of the DEM, e.g. ``"layer_dem_44c1"``.
+-    elevations (tuple[tuple[float, ...], ...]): Elevation of every cell in metres.
+-    cell_size_m (float): Width and height of one cell in metres.
+-    origin (tuple[float, float]): ``(x, y)`` of the north-west corner cell
+-        centre in the units of ``crs``.
+-    crs (str): Coordinate reference system of ``origin``.
+-    nodata (float | None): Sentinel value marking cells without data.
++Args:
++    layer_id: Identifier of the DEM layer in the GeoDesk project.
++    elevations: Elevation values in metres as a tuple of row tuples. Use
++        :meth:`from_rows` to build one from ordinary lists with validation.
++    cell_size_m: Width and height of a cell, in metres.
++    origin: ``(x, y)`` coordinates of the north-west corner of the grid.
++    crs: Coordinate reference system code of the grid.
++    nodata: Sentinel value marking missing data, or ``None`` if only NaN
++        values mark missing cells.
++
++Returns:
++    ElevationGrid: A new frozen grid instance.
++
++Raises:
++    dataclasses.FrozenInstanceError: If an attribute is assigned after
++        construction.
+ 
+ Example:
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> zaisan_dem.shape
+-    (3, 3)
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01",
++    ...     [[100, 110], [105, 115]],
++    ...     cell_size_m=30.0,
++    ...     origin=(500000.0, 5200000.0),
++    ... )
++    >>> grid.shape
++    (2, 2)
++
++See Also:
++    :class:`ContourGenerator` for turning a grid into contour lines.
+--- manual/ElevationGrid.from_rows
++++ ai/ElevationGrid.from_rows
+@@ -1,28 +1,32 @@
+-Build a grid from nested lists, as returned by ``rasterio`` ``read(1).tolist()``.
++Build a validated, immutable grid from nested lists of elevations.
+ 
+ Args:
+-    layer_id: GeoDesk layer ID of the DEM.
+-    rows: Elevations in metres, north row first. All rows must have
+-        the same length and the grid must be at least 2 × 2.
+-    cell_size_m: Cell width and height in metres; must be positive.
+-    origin: ``(x, y)`` of the north-west cell centre in ``crs`` units.
+-    crs: Coordinate reference system, UTM 48N by default.
+-    nodata: Value that marks missing cells, or ``None`` if every cell is valid.
++    layer_id: Identifier of the DEM layer in the GeoDesk project.
++    rows: Elevation values in metres, one inner list per grid row,
++        ordered north to south. Needs at least 2 rows and 2 columns.
++    cell_size_m: Width and height of a cell, in metres. Must be
++        positive.
++    origin: ``(x, y)`` coordinates of the north-west corner.
++    crs: Coordinate reference system code of the grid.
++    nodata: Sentinel value that marks missing cells, or ``None``.
+ 
+ Returns:
+-    ElevationGrid: An immutable grid.
++    ElevationGrid: A frozen grid whose values are converted to floats.
+ 
+ Raises:
+-    ValueError: If the rows are ragged, smaller than 2 × 2, or
+-        ``cell_size_m`` is not positive.
++    ValueError: If the grid is smaller than 2 x 2 cells, the rows have
++        differing lengths, or ``cell_size_m`` is not positive.
+ 
+ Example:
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> zaisan_dem.crs
+-    'EPSG:32648'
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01",
++    ...     [[100, 110, 120], [105, 115, 125], [110, 120, 130]],
++    ...     cell_size_m=30.0,
++    ...     origin=(500000.0, 5200000.0),
++    ...     nodata=-9999.0,
++    ... )
++    >>> grid.shape
++    (3, 3)
++
++See Also:
++    :attr:`shape` for the dimensions of the resulting grid.
+--- manual/ElevationGrid.shape
++++ ai/ElevationGrid.shape
+@@ -1 +1,21 @@
+-tuple[int, int]: Number of ``(rows, columns)``.
++tuple[int, int]: The grid dimensions as ``(row_count, column_count)``.
++
++Args:
++    None: This is a read-only property.
++
++Returns:
++    tuple[int, int]: Number of rows and number of columns.
++
++Raises:
++    IndexError: If the grid was constructed directly with no rows.
++
++Example:
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01", [[1, 2, 3], [4, 5, 6]],
++    ...     cell_size_m=10.0, origin=(0.0, 0.0),
++    ... )
++    >>> grid.shape
++    (2, 3)
++
++See Also:
++    :attr:`size_mb` for the memory footprint derived from the shape.
+--- manual/ElevationGrid.size_mb
++++ ai/ElevationGrid.size_mb
+@@ -1,12 +1,25 @@
+-float: Estimated size of the DEM as a float32 GeoTIFF, in megabytes.
++float: Estimated in-memory size of the grid, in megabytes.
++
++The estimate assumes 4 bytes per cell and 1,000,000 bytes per
++megabyte.
++
++Args:
++    None: This is a read-only property.
++
++Returns:
++    float: Approximate size of the DEM in megabytes.
++
++Raises:
++    IndexError: If the grid was constructed directly with no rows.
+ 
+ Example:
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> zaisan_dem.size_mb
+-    3.6e-05
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01", [[0, 0], [0, 0]],
++    ...     cell_size_m=10.0, origin=(0.0, 0.0),
++    ... )
++    >>> grid.size_mb
++    1.6e-05
++
++See Also:
++    :class:`ContourGenerator`, whose ``max_size_mb`` limit is checked
++    against this value.
+--- manual/ElevationGrid.nodata_ratio
++++ ai/ElevationGrid.nodata_ratio
+@@ -1,15 +1,25 @@
+-Return the share of cells that are NoData.
++Compute the fraction of cells that hold no data.
++
++A cell counts as missing if it is NaN or equals the ``nodata``
++sentinel.
++
++Args:
++    None.
+ 
+ Returns:
+-    float: A value from ``0.0`` (complete DEM) to ``1.0`` (no data at all).
++    float: Ratio of missing cells between 0.0 and 1.0.
++
++Raises:
++    ZeroDivisionError: If the grid contains no cells at all (only
++        possible when built without :meth:`from_rows`).
+ 
+ Example:
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, -9999.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0), nodata=-9999.0)
+-    >>> round(zaisan_dem.nodata_ratio(), 3)
+-    0.111
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01", [[1, -9999], [3, 4]],
++    ...     cell_size_m=10.0, origin=(0.0, 0.0), nodata=-9999.0,
++    ... )
++    >>> grid.nodata_ratio()
++    0.25
++
++See Also:
++    :meth:`valid_range` for the range of the valid cells.
+--- manual/ElevationGrid.valid_range
++++ ai/ElevationGrid.valid_range
+@@ -1,18 +1,23 @@
+-Return the lowest and highest elevation, ignoring NoData cells.
++Return the lowest and highest valid elevations in the grid.
++
++Args:
++    None.
+ 
+ Returns:
+-    tuple[float, float]: ``(min_elevation_m, max_elevation_m)``.
++    tuple[float, float]: ``(minimum, maximum)`` of all cells that are
++    not NoData.
+ 
+ Raises:
+-    NoDataCoverageError: If every cell is NoData.
++    NoDataCoverageError: If every cell in the grid is NoData.
+ 
+ Example:
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> zaisan_dem.valid_range()
+-    (1350.0, 1354.0)
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01", [[100, 110], [105, 130]],
++    ...     cell_size_m=30.0, origin=(0.0, 0.0),
++    ... )
++    >>> grid.valid_range()
++    (100.0, 130.0)
++
++See Also:
++    :meth:`ContourGenerator.levels` which uses this range to choose
++    contour elevations.
+--- manual/ContourLine
++++ ai/ContourLine
+@@ -1,12 +1,20 @@
+-One contour segment at a single elevation.
++A single contour polyline at one elevation.
+ 
+-Attributes:
+-    elevation_m (float): Elevation of the line in metres.
+-    points (tuple[tuple[float, float], ...]): Vertices in ``crs`` units,
+-        west-to-east order is not guaranteed.
++Args:
++    elevation_m: Elevation of the contour, in metres.
++    points: Ordered ``(x, y)`` vertices of the line in the layer CRS.
++
++Returns:
++    ContourLine: A new frozen contour line.
++
++Raises:
++    dataclasses.FrozenInstanceError: If an attribute is assigned after
++        construction.
+ 
+ Example:
+-    >>> from geodesk.terrain import ContourLine
+-    >>> ridge_line = ContourLine(1352.0, ((650030.0, 5310000.0), (650000.0, 5309970.0)))
+-    >>> ridge_line.length_m
+-    42.43
++    >>> line = ContourLine(110.0, ((0.0, 0.0), (3.0, 4.0)))
++    >>> line.length_m
++    5.0
++
++See Also:
++    :class:`ContourLayer` which groups lines produced from one DEM.
+--- manual/ContourLine.length_m
++++ ai/ContourLine.length_m
+@@ -1 +1,18 @@
+-float: Planar length of the line in metres, rounded to centimetres.
++float: Planar length of the line in metres, rounded to 2 decimals.
++
++Args:
++    None: This is a read-only property.
++
++Returns:
++    float: Sum of straight segment lengths between consecutive points.
++    A line with fewer than two points has length 0.
++
++Raises:
++    None.
++
++Example:
++    >>> ContourLine(100.0, ((0.0, 0.0), (3.0, 4.0), (3.0, 10.0))).length_m
++    11.0
++
++See Also:
++    :meth:`ContourLayer.to_geojson` to export the geometry.
+--- manual/ContourLayer
++++ ai/ContourLayer
+@@ -1,24 +1,27 @@
+-The vector layer returned by :meth:`ContourGenerator.generate`.
++A set of contour lines derived from a single DEM layer.
+ 
+-It is handed to B3 (layer manager) and becomes ``output_layer_id`` in the
+-W05 ``ContourResult`` API response.
++Args:
++    layer_id: Identifier of this contour layer.
++    source_layer_id: Identifier of the DEM the contours came from.
++    interval_m: Vertical spacing between contour levels, in metres.
++    crs: Coordinate reference system code of the line coordinates.
++    lines: The contour lines in the layer.
+ 
+-Attributes:
+-    layer_id (str): ID of the new contour layer, e.g. ``"layer_contour_9a21"``.
+-    source_layer_id (str): ID of the DEM the contours were traced from.
+-    interval_m (float): Vertical distance between neighbouring contours.
+-    crs (str): Coordinate reference system of every point.
+-    lines (tuple[ContourLine, ...]): All traced contour segments.
++Returns:
++    ContourLayer: A new frozen contour layer.
++
++Raises:
++    dataclasses.FrozenInstanceError: If an attribute is assigned after
++        construction.
+ 
+ Example:
+-    >>> from geodesk import ContourGenerator
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> contour_layer = ContourGenerator(interval_m=1.0).generate(zaisan_dem)
+-    >>> contour_layer.elevations()
+-    [1351.0, 1352.0, 1353.0]
++    >>> layer = ContourLayer(
++    ...     "layer_contour_01", "layer_dem_01", 10.0, "EPSG:32648",
++    ...     (ContourLine(110.0, ((0.0, 0.0), (30.0, 0.0))),),
++    ... )
++    >>> layer.elevations()
++    [110.0]
++
++See Also:
++    :class:`ContourGenerator` which creates layers from an
++    :class:`ElevationGrid`.
+--- manual/ContourLayer.elevations
++++ ai/ContourLayer.elevations
+@@ -1,4 +1,23 @@
+-Return each distinct contour elevation once, lowest first.
++List the distinct contour elevations present in the layer.
++
++Args:
++    None.
+ 
+ Returns:
+-    list[float]: Sorted elevations in metres.
++    list[float]: Unique elevations in metres, sorted ascending.
++
++Raises:
++    None.
++
++Example:
++    >>> layer = ContourLayer(
++    ...     "layer_contour_01", "layer_dem_01", 10.0, "EPSG:32648",
++    ...     (ContourLine(120.0, ((0.0, 0.0), (1.0, 0.0))),
++    ...      ContourLine(110.0, ((0.0, 1.0), (1.0, 1.0))),
++    ...      ContourLine(110.0, ((0.0, 2.0), (1.0, 2.0)))),
++    ... )
++    >>> layer.elevations()
++    [110.0, 120.0]
++
++See Also:
++    :meth:`ContourGenerator.levels` for the levels planned from a DEM.
+--- manual/ContourLayer.to_geojson
++++ ai/ContourLayer.to_geojson
+@@ -1,21 +1,26 @@
+-Export the layer as a GeoJSON ``FeatureCollection`` (B1.3 format writer input).
++Convert the layer to a GeoJSON ``FeatureCollection``.
+ 
+-Each line becomes a ``LineString`` feature with an ``elevation_m``
+-property, so the result can be saved directly with ``json.dump``.
++Each contour line becomes a ``LineString`` feature with an
++``elevation_m`` property. The collection ``name`` is the layer id.
++Coordinates are left in the layer CRS.
++
++Args:
++    None.
+ 
+ Returns:
+-    dict: A GeoJSON FeatureCollection. Coordinates stay in ``crs``;
+-    no reprojection to WGS84 is done.
++    dict: A GeoJSON-compatible dictionary ready for ``json.dumps``.
++
++Raises:
++    None.
+ 
+ Example:
+-    >>> from geodesk import ContourGenerator
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> geojson = ContourGenerator(interval_m=1.0).generate(zaisan_dem).to_geojson()
+-    >>> geojson["features"][0]["properties"]
+-    {'elevation_m': 1351.0}
++    >>> layer = ContourLayer(
++    ...     "layer_contour_01", "layer_dem_01", 10.0, "EPSG:32648",
++    ...     (ContourLine(110.0, ((0.0, 0.0), (30.0, 0.0))),),
++    ... )
++    >>> data = layer.to_geojson()
++    >>> data["features"][0]["properties"]
++    {'elevation_m': 110.0}
++
++See Also:
++    :attr:`ContourLine.length_m` for measuring individual features.
+--- manual/ContourGenerator
++++ ai/ContourGenerator
+@@ -1,29 +1,27 @@
+-Traces contour lines from a DEM at a fixed vertical interval (FR-09).
++Generate contour lines from an :class:`ElevationGrid`.
+ 
+-The generator validates the DEM first (B5.1 DEM validator) so that
+-oversized or damaged rasters fail with a clear error instead of crashing
+-the Geo Processing Engine (NFR-05).
++Contours are traced cell by cell, interpolating linearly along cell edges
++where the surface crosses a contour level. Cells touching NoData values
++are skipped.
+ 
+ Args:
+-    interval_m: Vertical distance between contours in metres. Must be
+-        finite and at least 0.5 m, the accuracy guaranteed by FR-09.
+-    max_size_mb: Largest DEM accepted, in megabytes (default 200).
+-    max_nodata_ratio: Largest share of NoData cells accepted, from 0 to 1
+-        (default 0.2).
++    interval_m: Vertical spacing between contours, in metres. Must be
++        finite and at least :attr:`MIN_INTERVAL_M`.
++    max_size_mb: Largest DEM, in megabytes, that will be processed.
++    max_nodata_ratio: Largest allowed fraction of NoData cells (0 to 1).
++
++Returns:
++    ContourGenerator: A configured generator.
+ 
+ Raises:
+-    InvalidIntervalError: If ``interval_m`` is below 0.5, infinite or NaN.
++    InvalidIntervalError: If ``interval_m`` is not finite or is below
++        :attr:`MIN_INTERVAL_M`.
+ 
+ Example:
+-    >>> from geodesk import ContourGenerator
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> one_metre_contours = ContourGenerator(interval_m=1.0)
+-    >>> contour_layer = one_metre_contours.generate(zaisan_dem)
+-    >>> len(contour_layer.lines)
+-    7
++    >>> generator = ContourGenerator(interval_m=10.0, max_size_mb=100.0)
++    >>> generator.interval_m
++    10.0
++
++See Also:
++    :class:`ElevationGrid` for the input and :class:`ContourLayer` for the
++    output.
+--- manual/ContourGenerator.levels
++++ ai/ContourGenerator.levels
+@@ -1,26 +1,26 @@
+-Return the contour elevations that fall strictly inside the DEM's range.
++Compute the contour elevations that apply to a grid.
+ 
+-Levels are multiples of ``interval_m``, so two DEMs processed with the
+-same generator always share contour elevations and can be merged.
++Levels are multiples of the interval, starting with the first multiple
++strictly above the grid's lowest valid elevation.
+ 
+ Args:
+-    grid: The DEM to inspect.
++    grid: The DEM whose valid elevation range determines the levels.
+ 
+ Returns:
+-    list[float]: Contour elevations in metres, lowest first. Empty if
+-    the terrain is flatter than one interval.
++    list[float]: Contour elevations in metres, ascending. May be empty
++    if the terrain is too flat for any level.
+ 
+ Raises:
+-    NoDataCoverageError: If every cell of ``grid`` is NoData.
++    NoDataCoverageError: If the grid contains only NoData cells.
+ 
+ Example:
+-    >>> from geodesk import ContourGenerator
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> ContourGenerator(interval_m=2.0).levels(zaisan_dem)
+-    [1352.0]
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01",
++    ...     [[100, 110, 120], [105, 115, 125], [110, 120, 130]],
++    ...     cell_size_m=30.0, origin=(500000.0, 5200000.0),
++    ... )
++    >>> ContourGenerator(interval_m=10.0).levels(grid)
++    [110.0, 120.0]
++
++See Also:
++    :meth:`generate` which traces lines at each of these levels.
+--- manual/ContourGenerator.generate
++++ ai/ContourGenerator.generate
+@@ -1,30 +1,30 @@
+-Validate ``grid`` and trace all contour lines with marching squares.
++Trace contour lines for every level of a DEM.
+ 
+-A 50 MB DEM finishes in under 8 seconds on the reference machine
+-(FR-09 verification). Cells that touch a NoData value are skipped, so
+-lines stop at data gaps instead of bending towards the sentinel value.
++The DEM is first checked against the size and NoData limits.
+ 
+ Args:
+-    grid: The DEM to contour, typically from B1.2 (raster reader).
+-    output_layer_id: ID given to the returned layer.
++    grid: The DEM to contour.
++    output_layer_id: Identifier to give the resulting layer.
+ 
+ Returns:
+-    ContourLayer: One :class:`ContourLine` per cell crossing, in the
+-    CRS of ``grid``.
++    ContourLayer: A layer holding one segment line per traced contour
++    piece, in the grid's CRS.
+ 
+ Raises:
+-    DEMTooLargeError: If ``grid.size_mb`` exceeds ``max_size_mb``.
+-    NoDataCoverageError: If the NoData share exceeds ``max_nodata_ratio``.
++    DEMTooLargeError: If the grid is larger than ``max_size_mb``.
++    NoDataCoverageError: If the NoData ratio exceeds
++        ``max_nodata_ratio`` or the grid has no valid cells.
+ 
+ Example:
+-    >>> from geodesk import ContourGenerator
+-    >>> from geodesk.terrain import ElevationGrid
+-    >>> zaisan_dem = ElevationGrid.from_rows(
+-    ...     "layer_dem_44c1",
+-    ...     [[1350.0, 1351.0, 1352.0],
+-    ...      [1351.0, 1352.0, 1353.0],
+-    ...      [1352.0, 1353.0, 1354.0]],
+-    ...     cell_size_m=30.0, origin=(650000.0, 5310000.0))
+-    >>> contour_layer = ContourGenerator(interval_m=1.0).generate(zaisan_dem)
+-    >>> contour_layer.lines[0]
+-    ContourLine(elevation_m=1351.0, points=((650030.0, 5310000.0), (650000.0, 5309970.0)))
++    >>> grid = ElevationGrid.from_rows(
++    ...     "layer_dem_01",
++    ...     [[100, 110, 120], [105, 115, 125], [110, 120, 130]],
++    ...     cell_size_m=30.0, origin=(500000.0, 5200000.0),
++    ... )
++    >>> layer = ContourGenerator(interval_m=10.0).generate(
++    ...     grid, output_layer_id="layer_contour_site_a")
++    >>> layer.source_layer_id
++    'layer_dem_01'
++
++See Also:
++    :meth:`ContourLayer.to_geojson` to export the result.

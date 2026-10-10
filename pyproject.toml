@@ -1,0 +1,10 @@
+[project]
+name = "geodesk"
+version = "0.6.0"
+description = "GeoDesk GIS Geo Processing Engine"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests", "src"]
+addopts = "--doctest-modules"
