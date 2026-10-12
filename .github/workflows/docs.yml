@@ -1,0 +1,46 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Tests (docstring coverage, doctests, hallucination checks)
+        run: python -m pytest -v
+
+      - name: Sphinx doctest (no warnings allowed)
+        run: sphinx-build -W --keep-going -b doctest docs/source build/doctest
+
+      - name: Sphinx HTML build (no warnings allowed)
+        run: sphinx-build -W --keep-going -b html docs/source public
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
